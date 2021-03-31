@@ -43,6 +43,8 @@ E.g. to plot male smokers (%) for Greece, Spain and Italy, use:
 which will produce:
 ![alt text](https://github.com/xanthospap/acab19/blob/main/gallery/gr_sp_it_male_smokers.png?raw=true)
 
+> When plotting a bar graph, the x-axis must be specified (via a command line argument) and set to `--x-axis=location`
+
 ## Scatter graphs
 
 Data columns/records which are changing in time, are plotted as (line connected) 
@@ -53,6 +55,8 @@ E.g. to plot the fully vaccinated in Greece, Spain, Italy and Israel, use:
 `./acab19.py --countries Greece Spain Italy Israel --y-axis=people_fully_vaccinated` 
 which will produce something like:
 ![alt text](https://github.com/xanthospap/acab19/blob/main/gallery/gr_sp_it_is_people_vaccinated.png?raw=true)
+
+> When plotting a scatter graph, the x-axis can be ommited; if not, it must be set to `--x-axis=date`
 
 ## Dataset file
 
