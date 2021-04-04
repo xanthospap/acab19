@@ -16,6 +16,7 @@ import shutil
 import sys
 import os
 import re
+import operator
 import pandas
 from pandas.core.common import flatten
 import argparse
@@ -57,6 +58,178 @@ static_columns = [
 ]
 
 geo_columns = ['iso_code', 'continent', 'location']
+
+
+def set_pandas_display_options():
+    """Set pandas display options."""
+    # Ref: https://stackoverflow.com/a/52432757/
+    display = pandas.options.display
+
+    display.max_columns = 1000
+    display.max_rows = 1000
+    display.max_colwidth = 199
+    display.width = 1000
+    # display.precision = 2  # set as needed
+
+
+def str_to_operator(op_str):
+    if op_str == '=':
+        return operator.eq
+    elif op_str == '<':
+        return operator.lt
+    elif op_str == '<=':
+        return operator.le
+    elif op_str == '>=':
+        return operator.ge
+    elif op_str == '>':
+        return operator.gt
+    elif op_str == 'or':
+        return operator.or_
+    elif op_str == 'and':
+        return operator.and_
+    err_msg = '[ERROR] Invalid comparisson operator \'{:}\''.format(op_str)
+    raise RuntimeError(err_msg)
+
+
+def apply_filter(df, filter_dct):
+    if 'target' in filter_dct:  ## simple filter
+        return df[filter_dct['op'](df[filter_dct['target']], filter_dct['val'])]
+    else:  ## filter has sub-filters
+        sub_filters = max([
+            int(re.match('filter([0-9]+)', kkey).group(1))
+            for kkey in filter_dct
+            if re.match('filter[0-9]+', kkey)
+        ]) + 1  ## filters a 0-indexed
+        if sub_filters > 2:
+            raise RuntimeError(
+                '[ERROR] Parenthesized filter criteria must be at maximum two!')
+        op = str_to_operator(filter_dct['con0-1'])
+        """
+        print('df[{:}('.format(op), end='')
+        print('({:}(df[{:}], {:})),'.format(filter_dct['filter0']['op'], filter_dct['filter0']['target'], filter_dct['filter0']['val']), end='')
+        print('({:}(df[{:}], {:})))]'.format(filter_dct['filter1']['op'], filter_dct['filter1']['target'], filter_dct['filter1']['val']))
+        """
+        return df[op(
+            (filter_dct['filter0']['op'](df[filter_dct['filter0']['target']],
+                                         filter_dct['filter0']['val'])),
+            (filter_dct['filter1']['op'](df[filter_dct['filter1']['target']],
+                                         filter_dct['filter1']['val'])))]
+
+
+def filter_countries(df, filter_str):
+    num_filters, filter_dct = parse_user_filter(filter_str)
+    ## first filter
+    filtered_df = apply_filter(df, filter_dct['filter0'])
+    for filter_nr in range(1, num_filters):
+        key = 'filter{:}'.format(filter_nr)
+        k_filter = filter_dct[key]
+        new_df = apply_filter(df, k_filter)
+        operation = filter_dct['con{:}-{:}'.format(filter_nr - 1, filter_nr)]
+        if operation == 'or':
+            # filtered_df = pandas.concat([filtered_df, new_df]).drop_duplicates()
+            filtered_df = pandas.merge(filtered_df, new_df, how='outer')
+        elif operation == 'and':
+            filtered_df = pandas.merge(filtered_df, new_df, how='inner')
+    # return filtered_df
+    return list(
+        flatten(filtered_df['location'].drop_duplicates(keep='last').values))
+
+
+def parse_user_filter(filter_str):
+    """ Example:
+         filter_str = '(gdp_per_capita > 5 and gdp_per_capita < 7) and human_development_index > 1 or (cardiovasc_death_rate>5 and extreme_poverty<20)'
+         Returned Value:
+        {
+            'filter0': 
+                {
+                'filter0': 
+                    {
+                        'target': 'gdp_per_capita', 'op': <built-in function gt>, 'val': 5.0 
+                     }, 
+                 'con0-1': 'and', 
+                 filter1': 
+                    {
+                        'target': 'gdp_per_capita', 'op': <built-in function lt>, 'val': 7.0
+                    }
+                },
+             'con0-1': 'and', 
+             'filter1': 
+                {
+                    'target': 'human_development_index', 'op': <built-in function gt>, 'val': 1.0
+                }, 
+             'con1-2': 'or', 
+             'filter2': 
+                {'
+                filter0': 
+                    {
+                        'target': 'cardiovasc_death_rate', 'op': <built-in function gt>, 'val': 5.0
+                    }, 
+                'con0-1': 'and', 
+                'filter1': 
+                    {
+                        'target': 'extreme_poverty', 'op': <built-in function lt>, 'val': 20.0
+                    }
+                }
+            }
+    """
+    dct = {}
+    ## add spaces before and after symbols >, <, =, (, )
+    filter_str = re.sub('(\()([a-z]+)', '\\1 \\2', filter_str)
+    filter_str = re.sub('([0-9]+)(\))', '\\1 \\2', filter_str)
+    for w in ['>', '<', '=']:
+        filter_str = re.sub('({:})([a-z0-9]+)'.format(w), '\\1 \\2', filter_str)
+        filter_str = re.sub('([a-z0-9]+)({:})'.format(w), '\\1 \\2', filter_str)
+    fcols = filter_str.split()
+    assert (len(fcols) > 0)
+    idx = 0
+    num_filters, sub_filter = 0, 0
+    open_parenthesis = False
+    while idx < len(fcols):
+        if fcols[idx] == '(':
+            assert (not open_parenthesis)
+            open_parenthesis = True
+            idx += 1
+        d_column = fcols[idx]
+        assert (d_column in static_columns)
+        d_op = fcols[idx + 1]
+        assert (d_op in ['=', '>', '<', '>=', '<='])
+        d_val = float(fcols[idx + 2])
+        idx += 3
+        key = 'filter{:}'.format(num_filters)
+        if open_parenthesis:
+            if key not in dct:
+                dct[key] = {}
+            key2 = 'filter{:}'.format(sub_filter)
+            dct[key][key2] = {
+                'target': d_column,
+                'op': str_to_operator(d_op),
+                'val': d_val
+            }
+            sub_filter += 1
+        else:
+            dct[key] = {
+                'target': d_column,
+                'op': str_to_operator(d_op),
+                'val': d_val
+            }
+            num_filters += 1
+        if idx < len(fcols):
+            if fcols[idx] == ')':
+                assert (open_parenthesis)
+                sub_filter = 0
+                open_parenthesis = False
+                num_filters += 1
+                idx += 1
+        if idx < len(fcols):
+            con = fcols[idx]
+            assert (con in ['and', 'or'])
+            if open_parenthesis:
+                dct[key]['con{:}-{:}'.format(sub_filter - 1, sub_filter)] = con
+            else:
+                assert (not open_parenthesis)
+                dct['con{:}-{:}'.format(num_filters - 1, num_filters)] = con
+            idx += 1
+    return num_filters, dct
 
 
 def get_csv(filename=None):
@@ -169,6 +342,7 @@ def create_scatter(df, **kwargs):
         print('[ERROR] Probable fix: set --x-axis=date', file=sys.stderr)
         raise RuntimeError('[ERROR] Invalid x-axis selection')
     y_axis = kwargs['columns'][1]
+    assert (y_axis in csv_header and y_axis not in static_columns)
     plt.figure()
     legend = []
     if 'continents' in kwargs:
@@ -196,6 +370,7 @@ def create_scatter(df, **kwargs):
     plt.legend(legend)
     plt.title('Coivd-19 {:} Vs {:}; data source:\n{:}'.format(
         x_axis, y_axis, COVID_URI))
+    plt.xticks(rotation=45, ha='right')
     plt.grid(True)
     plt.show()
 
@@ -264,7 +439,7 @@ parser.add_argument(
     required=False,
     nargs='*',
     help=
-    'Plot data for given countries. Pass arguments by name e.g. \'Austria\'. Multiple arguments can be passed in using whitespace character as delimeter, e.g. \'Austria Greece Sweden\''
+    'Plot data for given countries. Pass arguments by name e.g. \'Austria\'. Multiple arguments can be passed in using whitespace character as delimeter, e.g. \'Austria Greece Sweden\'. If left unset and \'--continents\' is also unset, then all countries in the data file are condidered.'
 )
 parser.add_argument(
     '--continents',
@@ -273,7 +448,7 @@ parser.add_argument(
     required=False,
     nargs='*',
     help=
-    'Plot data for given countries. Pass arguments by name e.g. \'Austria\'. Multiple arguments can be passed in using whitespace character as delimeter, e.g. \'Austria Greece Sweden\''
+    'Plot data for given continents. Pass arguments by name e.g. \'Austria\'. Multiple arguments can be passed in using whitespace character as delimeter, e.g. \'Asia Africa\''
 )
 parser.add_argument(
     '--x-axis',
@@ -292,6 +467,12 @@ parser.add_argument(
     help=
     'Define the y-axis; i.e. choose the data value to be defined as the plot\'s y-axis.'
 )
+parser.add_argument('--filter',
+                    metavar='FILTER',
+                    dest='filter',
+                    required=False,
+                    nargs='*',
+                    help='Filter locations based on some static column.')
 
 # parse cmd args
 args = parser.parse_args()
@@ -318,6 +499,28 @@ country_list = args.countries if args.countries is not None else []
 
 ## get the continent list
 continent_list = args.continents if args.continents is not None else []
+
+## choose all countries if user-defined continets/countries lists are empty
+if continent_list == [] and country_list == []:
+    country_list = get_country_list(df)
+
+## if we are going to filter the data, fuck the continents; collect all
+## countries to the country list
+if args.filter is not None:
+    [
+        country_list.extend(countries_in_continent(df, continent))
+        for continent in continent_list
+    ]
+    continent_list = []
+    ## apply filters to get (valid) countries
+    filtered_country_list = filter_countries(df, *args.filter)
+    ## get the intesection
+    country_list = [
+        country for country in country_list if country in filtered_country_list
+    ]
+    set_pandas_display_options()
+    print(df.loc[df['location'].isin(country_list),
+                 static_columns].drop_duplicates(subset=['location']))
 
 if args.x_axis in geo_columns and args.y_axis in static_columns:
     create_bar(df,
