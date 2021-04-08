@@ -277,9 +277,12 @@ def get_owid_iso_codes(df):
                            subset=['location'], keep='last').values)
 
 
-def get_country_list(df):
-    return list(df[geo_columns].drop_duplicates(subset=['location'],
-                                                keep='last').fillna('').values)
+def get_country_list(df, flat=False):
+    return list(df[geo_columns].drop_duplicates(
+        subset=['location'
+               ], keep='last').fillna('').values) if not flat else list(
+                   flatten(df[geo_columns].drop_duplicates(
+                       subset=['location'], keep='last').fillna('').values))
 
 
 def print_country_list(df):
@@ -402,6 +405,7 @@ def create_bar(df, **kwargs):
     ax.legend()
     #for bar in bars:
     #  ax.bar_label(bar, padding=3)
+    fig.autofmt_xdate(rotation=45)
     fig.tight_layout()
     plt.show()
 
@@ -502,7 +506,7 @@ continent_list = args.continents if args.continents is not None else []
 
 ## choose all countries if user-defined continets/countries lists are empty
 if continent_list == [] and country_list == []:
-    country_list = get_country_list(df)
+    country_list = get_country_list(df, True)
 
 ## if we are going to filter the data, fuck the continents; collect all
 ## countries to the country list
