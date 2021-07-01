@@ -45,7 +45,7 @@ csv_header = [
     'gdp_per_capita', 'extreme_poverty', 'cardiovasc_death_rate',
     'diabetes_prevalence', 'female_smokers', 'male_smokers',
     'handwashing_facilities', 'hospital_beds_per_thousand', 'life_expectancy',
-    'human_development_index'
+    'human_development_index', 'excess_mortality'
 ]
 
 static_columns = [
@@ -368,7 +368,7 @@ def create_scatter(df, **kwargs):
             key = 'location' if not re.match('^OWID_[A-Z]+',
                                              country.upper()) else 'iso_code'
             xy = ndf.loc[ndf[key] == country, [x_axis, y_axis]]
-            plt.plot(xy[x_axis], xy[y_axis], marker='o')
+            plt.plot(xy[x_axis], xy[y_axis], marker='o', linewidth=0.99, markersize=1)
             legend.append(country)
     plt.legend(legend)
     plt.title('Coivd-19 {:} Vs {:}; data source:\n{:}'.format(
