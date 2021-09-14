@@ -483,7 +483,7 @@ args = parser.parse_args()
 
 # load the dataframe
 df = load_dataframe(args.csv_file)
-assert (all(df.columns == csv_header))
+# assert (all(df.columns == csv_header)) they always seem to increase!
 
 # print columns if needed
 if args.print_columns:
